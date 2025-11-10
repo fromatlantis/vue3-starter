@@ -80,18 +80,22 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   House,
   User,
   UserFilled,
+  Setting,
+  Tools,
+  Document,
   Expand,
   Fold,
   ArrowDown
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 
 // 侧边栏折叠状态
 const isCollapse = ref(false)
