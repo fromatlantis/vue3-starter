@@ -1,5 +1,54 @@
 <template>
   <div class="user-table">
+    <!-- 新增用户对话框 -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="600px"
+      @close="handleDialogClose"
+    >
+      <el-form
+        ref="formRef"
+        :model="userForm"
+        :rules="formRules"
+        label-width="80px"
+      >
+        <el-form-item label="用户名" prop="username">
+          <el-input
+            v-model="userForm.username"
+            placeholder="请输入用户名"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="邮箱" prop="email">
+          <el-input
+            v-model="userForm.email"
+            placeholder="请输入邮箱"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="手机号" prop="phone">
+          <el-input
+            v-model="userForm.phone"
+            placeholder="请输入手机号"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="状态" prop="status">
+          <el-radio-group v-model="userForm.status">
+            <el-radio value="active">激活</el-radio>
+            <el-radio value="disabled">禁用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmit" :loading="submitLoading">
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 查询条件区域 -->
     <el-card shadow="never" class="search-card">
       <template #header>
@@ -7,15 +56,15 @@
       </template>
       <el-form :model="searchForm" :inline="true" class="search-form">
         <el-form-item label="用户名">
-          <el-input 
-            v-model="searchForm.username" 
+          <el-input
+            v-model="searchForm.username"
             placeholder="请输入用户名"
             clearable
           />
         </el-form-item>
         <el-form-item label="邮箱">
-          <el-input 
-            v-model="searchForm.email" 
+          <el-input
+            v-model="searchForm.email"
             placeholder="请输入邮箱"
             clearable
           />
@@ -62,8 +111,8 @@
 
     <!-- 表格区域 -->
     <el-card shadow="never" class="table-card">
-      <el-table 
-        :data="tableData" 
+      <el-table
+        :data="tableData"
         v-loading="loading"
         @selection-change="handleSelectionChange"
         stripe
@@ -88,9 +137,9 @@
             <el-button type="primary" size="small" @click="handleEdit(row)">
               编辑
             </el-button>
-            <el-button 
-              :type="row.status === 'active' ? 'warning' : 'success'" 
-              size="small" 
+            <el-button
+              :type="row.status === 'active' ? 'warning' : 'success'"
+              size="small"
               @click="handleToggleStatus(row)"
             >
               {{ row.status === 'active' ? '禁用' : '启用' }}
@@ -120,8 +169,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Refresh, Plus, Delete, Download } from '@element-plus/icons-vue'
+import { supabase } from '@/utils/supabase'
 
 // 定义用户数据类型
 interface UserData {
@@ -131,7 +181,15 @@ interface UserData {
   phone: string
   status: 'active' | 'disabled'
   createTime: string
-  lastLoginTime: string
+  lastLoginTime: string | null
+}
+
+// 定义用户表单类型
+interface UserForm {
+  username: string
+  email: string
+  phone: string
+  status: 'active' | 'disabled'
 }
 
 // 查询表单
@@ -154,60 +212,80 @@ const pagination = reactive({
   total: 0
 })
 
-// 模拟数据
-const mockData: UserData[] = [
-  {
-    id: 1,
-    username: 'admin',
-    email: 'admin@example.com',
-    phone: '13800138001',
-    status: 'active',
-    createTime: '2024-01-01 10:00:00',
-    lastLoginTime: '2024-01-26 09:30:00'
-  },
-  {
-    id: 2,
-    username: 'user1',
-    email: 'user1@example.com',
-    phone: '13800138002',
-    status: 'active',
-    createTime: '2024-01-02 11:00:00',
-    lastLoginTime: '2024-01-25 14:20:00'
-  },
-  {
-    id: 3,
-    username: 'user2',
-    email: 'user2@example.com',
-    phone: '13800138003',
-    status: 'disabled',
-    createTime: '2024-01-03 12:00:00',
-    lastLoginTime: '2024-01-20 16:45:00'
-  },
-  {
-    id: 4,
-    username: 'testuser',
-    email: 'test@example.com',
-    phone: '13800138004',
-    status: 'active',
-    createTime: '2024-01-04 13:00:00',
-    lastLoginTime: '2024-01-24 10:15:00'
+// 对话框相关
+const dialogVisible = ref(false)
+const dialogTitle = ref('新增用户')
+const submitLoading = ref(false)
+const formRef = ref<FormInstance>()
+
+// 用户表单
+const userForm = reactive<UserForm>({
+  username: '',
+  email: '',
+  phone: '',
+  status: 'active'
+})
+
+// 表单验证规则
+const formRules: FormRules<UserForm> = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 20, message: '用户名长度在 3 到 20 个字符', trigger: 'blur' }
+  ],
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
+  ],
+  phone: [
+    { required: true, message: '请输入手机号', trigger: 'blur' },
+    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的手机号', trigger: 'blur' }
+  ],
+  status: [
+    { required: true, message: '请选择状态', trigger: 'change' }
+  ]
+}
+
+// 将Supabase数据转换为前端格式
+const transformUserData = (user: any): UserData => {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    phone: user.phone,
+    status: user.status,
+    createTime: new Date(user.created_at).toLocaleString('zh-CN'),
+    lastLoginTime: user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '-'
   }
-]
+}
 
 // 加载数据
-const loadData = () => {
+const loadData = async () => {
   loading.value = true
-  setTimeout(() => {
-    // 模拟API调用
-    tableData.value = mockData
-    pagination.total = mockData.length
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      ElMessage.error('加载数据失败: ' + error.message)
+      return
+    }
+
+    if (data) {
+      tableData.value = data.map((user: any) => transformUserData(user))
+      pagination.total = data.length
+    }
+  } catch (err) {
+    ElMessage.error('加载数据异常')
+    console.error(err)
+  } finally {
     loading.value = false
-  }, 500)
+  }
 }
 
 // 查询
 const handleSearch = () => {
-  console.log('查询条件:', searchForm)
   loadData()
   ElMessage.success('查询完成')
 }
@@ -225,7 +303,58 @@ const handleReset = () => {
 
 // 新增用户
 const handleAdd = () => {
-  ElMessage.info('新增用户功能待实现')
+  dialogTitle.value = '新增用户'
+  dialogVisible.value = true
+}
+
+// 关闭对话框
+const handleDialogClose = () => {
+  formRef.value?.resetFields()
+  Object.assign(userForm, {
+    username: '',
+    email: '',
+    phone: '',
+    status: 'active'
+  })
+}
+
+// 提交表单
+const handleSubmit = async () => {
+  if (!formRef.value) return
+
+  await formRef.value.validate(async (valid) => {
+    if (valid) {
+      submitLoading.value = true
+
+      try {
+        const { error } = await supabase
+          .from('users')
+          .insert([
+            {
+              username: userForm.username,
+              email: userForm.email,
+              phone: userForm.phone,
+              status: userForm.status
+            }
+          ])
+
+        if (error) {
+          ElMessage.error('新增用户失败: ' + error.message)
+          submitLoading.value = false
+          return
+        }
+
+        submitLoading.value = false
+        dialogVisible.value = false
+        ElMessage.success('新增用户成功')
+        await loadData()
+      } catch (err) {
+        submitLoading.value = false
+        ElMessage.error('新增用户异常')
+        console.error(err)
+      }
+    }
+  })
 }
 
 // 编辑用户
@@ -239,9 +368,24 @@ const handleDelete = (row: UserData) => {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
-    ElMessage.success('删除成功')
-    loadData()
+  }).then(async () => {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .eq('id', row.id)
+
+      if (error) {
+        ElMessage.error('删除失败: ' + error.message)
+        return
+      }
+
+      ElMessage.success('删除成功')
+      await loadData()
+    } catch (err) {
+      ElMessage.error('删除异常')
+      console.error(err)
+    }
   }).catch(() => {
     ElMessage.info('已取消删除')
   })
@@ -250,13 +394,30 @@ const handleDelete = (row: UserData) => {
 // 切换状态
 const handleToggleStatus = (row: UserData) => {
   const action = row.status === 'active' ? '禁用' : '启用'
+  const newStatus = row.status === 'active' ? 'disabled' : 'active'
+
   ElMessageBox.confirm(`确定要${action}用户 "${row.username}" 吗？`, '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
-    row.status = row.status === 'active' ? 'disabled' : 'active'
-    ElMessage.success(`${action}成功`)
+  }).then(async () => {
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ status: newStatus })
+        .eq('id', row.id)
+
+      if (error) {
+        ElMessage.error(`${action}失败: ` + error.message)
+        return
+      }
+
+      row.status = newStatus as 'active' | 'disabled'
+      ElMessage.success(`${action}成功`)
+    } catch (err) {
+      ElMessage.error(`${action}异常`)
+      console.error(err)
+    }
   })
 }
 
@@ -266,10 +427,26 @@ const handleBatchDelete = () => {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
-  }).then(() => {
-    ElMessage.success('批量删除成功')
-    selectedRows.value = []
-    loadData()
+  }).then(async () => {
+    try {
+      const ids = selectedRows.value.map(row => row.id)
+      const { error } = await supabase
+        .from('users')
+        .delete()
+        .in('id', ids)
+
+      if (error) {
+        ElMessage.error('批量删除失败: ' + error.message)
+        return
+      }
+
+      ElMessage.success('批量删除成功')
+      selectedRows.value = []
+      await loadData()
+    } catch (err) {
+      ElMessage.error('批量删除异常')
+      console.error(err)
+    }
   })
 }
 
